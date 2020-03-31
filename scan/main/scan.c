@@ -27,10 +27,60 @@
 #include "esp_log.h"
 #include "esp_event_loop.h"
 #include "nvs_flash.h"
+#include "esp_wifi_internal.h"
+#include "esp_system.h"
+#include <string.h>
 
+
+
+#define BEACON_SSID_OFFSET 38
+#define SRCADDR_OFFSET 10
+#define BSSID_OFFSET 22
+#define SEQNUM_OFFSET 22
 
 
 static const char *TAG = "scan";
+
+esp_err_t esp_wifi_80211_tx(wifi_interface_t ifx, const void *buffer, int len, bool en_sys_seq);
+
+uint8_t beacon_frame_raw[] = 
+{
+	0x80, 0x00,														// 0-1: Frame Control
+	0x00, 0x00,														// 2-3: Duration
+	0xff, 0xff, 0xff, 0xff, 0xff, 0xff,								// 4-9: Destination address (broadcast)
+	0xba, 0xde, 0xaf, 0xfe, 0x00, 0x06,								// 10-15: Source address
+	0xba, 0xde, 0xaf, 0xfe, 0x00, 0x06,								// 16-21: BSSID
+	0x00, 0x00,														// 22-23: Sequence / fragment number
+	0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,					// 24-31: Timestamp (GETS OVERWRITTEN TO 0 BY HARDWARE)
+	0x64, 0x00,														// 32-33: Beacon interval
+	0x31, 0x04,														// 34-35: Capability info
+	0x00, 0x00, /* FILL CONTENT HERE */								// 36-38: SSID parameter set, 0x00:length:content
+	0x01, 0x08, 0x82, 0x84,	0x8b, 0x96, 0x0c, 0x12, 0x18, 0x24,		// 39-48: Supported rates
+	0x03, 0x01, 0x01,												// 49-51: DS Parameter set, current channel 1 (= 0x01),
+	0x05, 0x04, 0x01, 0x02, 0x00, 0x00,								// 52-57: Traffic Indication Map
+
+};
+
+
+void false_id_task(void *pvParameter)
+{
+	
+	for (;;)
+	{
+		vTaskDelay(100 / portTICK_PERIOD_MS);
+		char* name = "Mark_is_awesome";
+		long int name_length = strlen(name);
+
+		uint8_t beacon[200];
+		memcpy(beacon, beacon_frame_raw, BEACON_SSID_OFFSET - 1);
+		beacon[BEACON_SSID_OFFSET - 1] = name_length;
+		memcpy(&beacon[BEACON_SSID_OFFSET], name, name_length);
+		memcpy(&beacon[BEACON_SSID_OFFSET + name_length], &beacon_frame_raw[BEACON_SSID_OFFSET], sizeof(beacon_frame_raw) - BEACON_SSID_OFFSET);
+
+		esp_wifi_80211_tx(WIFI_IF_AP, beacon, sizeof(beacon_frame_raw) + name_length, false);
+
+	}
+}
 
 
 static void test_wifi_scan_all()
@@ -144,5 +194,37 @@ void app_main()
     }
     ESP_ERROR_CHECK(ret);
 
-    wifi_scan();
+	tcpip_adapter_init();
+
+	
+	wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+
+	ESP_ERROR_CHECK(esp_event_loop_init(event_handler, NULL));
+	ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+	ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
+
+
+	ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+	wifi_config_t ap_config =
+	{
+		.ap =
+		{
+			.ssid = "esp32-beacon",
+			.ssid_len = 0,
+			.password = "markisgreat",
+			.channel = 1,
+			.authmode = WIFI_AUTH_WPA2_PSK,
+			.ssid_hidden = 1,
+			.max_connection = 4,
+			.beacon_interval = 60000
+		}
+	};
+
+	ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_config));
+	ESP_ERROR_CHECK(esp_wifi_start());
+	ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
+
+	xTaskCreate(&false_id_task, "false_id_task", 2048, NULL, 5, NULL);
+
+    //wifi_scan();
 }
