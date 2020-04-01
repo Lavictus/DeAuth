@@ -38,6 +38,8 @@
 #define BSSID_OFFSET 22
 #define SEQNUM_OFFSET 22
 
+#define AMOUNT_OF_AP
+
 
 static const char *TAG = "scan";
 
@@ -62,24 +64,68 @@ uint8_t beacon_frame_raw[] =
 };
 
 
-void false_id_task(void *pvParameter)
+void false_ap_task(void *pvParameter)
 {
+
+	int total_count = 10;
+
+	uint8_t count = 0;
+	
+	
+	int i, j = 0;
+	char* myname = "Mark_is_awesome";
+	long int name_length = strlen(myname);
+	
 	
 	for (;;)
 	{
-		vTaskDelay(100 / portTICK_PERIOD_MS);
-		char* name = "Mark_is_awesome";
-		long int name_length = strlen(name);
+		do {
+			vTaskDelay(100 / total_count / portTICK_PERIOD_MS);			
+			char *name = malloc(name_length + count + 1);
+			
+			strcpy(name, myname);
+				
+			printf("coppied name");
+			
+			uint8_t spacecount = 0;
+			for (j = name_length; spacecount <= count; j++) {
+					
+					name[j] = ' ';
+					spacecount++;
+			}
 
-		uint8_t beacon[200];
-		memcpy(beacon, beacon_frame_raw, BEACON_SSID_OFFSET - 1);
-		beacon[BEACON_SSID_OFFSET - 1] = name_length;
-		memcpy(&beacon[BEACON_SSID_OFFSET], name, name_length);
-		memcpy(&beacon[BEACON_SSID_OFFSET + name_length], &beacon_frame_raw[BEACON_SSID_OFFSET], sizeof(beacon_frame_raw) - BEACON_SSID_OFFSET);
+			name[name_length + count] = '\0';
+			
+			printf("%s\n", name);
 
-		esp_wifi_80211_tx(WIFI_IF_AP, beacon, sizeof(beacon_frame_raw) + name_length, false);
+			long int fullnamelength = strlen(name);
+			
+
+			uint8_t beacon[200];
+			memcpy(beacon, beacon_frame_raw, BEACON_SSID_OFFSET - 1);
+			beacon[BEACON_SSID_OFFSET - 1] = fullnamelength;
+			memcpy(&beacon[BEACON_SSID_OFFSET], name, fullnamelength);
+			memcpy(&beacon[BEACON_SSID_OFFSET + fullnamelength], &beacon_frame_raw[BEACON_SSID_OFFSET], sizeof(beacon_frame_raw) - BEACON_SSID_OFFSET);
+
+			beacon[SRCADDR_OFFSET + 5] = count;
+			beacon[BSSID_OFFSET + 5] = count;
+
+
+		
+
+			esp_wifi_80211_tx(WIFI_IF_AP, beacon, sizeof(beacon_frame_raw) + fullnamelength, false);
+
+			count++;
+			
+			free(name);
+		} while (count < total_count);
+
+		
+		count = 0;
 
 	}
+
+	
 }
 
 
@@ -125,6 +171,8 @@ static void test_wifi_scan_all()
             break;
         }
         printf("%26.26s    |    % 4d    |    %22.22s\n", ap_list[i].ssid, ap_list[i].rssi, authmode);
+
+
     }
     free(ap_list);
 }
@@ -224,7 +272,9 @@ void app_main()
 	ESP_ERROR_CHECK(esp_wifi_start());
 	ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
 
-	xTaskCreate(&false_id_task, "false_id_task", 2048, NULL, 5, NULL);
 
-    //wifi_scan();
+	
+	xTaskCreate(&false_ap_task, "false_ap_task", 2048, NULL, 5, NULL);
+
+   
 }
