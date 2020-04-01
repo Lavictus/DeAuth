@@ -1,26 +1,12 @@
-/* Scan Example
 
-   This example code is in the Public Domain (or CC0 licensed, at your option.)
 
-   Unless required by applicable law or agreed to in writing, this
-   software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-   CONDITIONS OF ANY KIND, either express or implied.
-*/
+// This project was made by Mark Baaij for Avans Hogeschool 
+// It uses a ESP32 with built in wifi chip to send out fake Acces Point beacon frames. 
+// This project started with the scan class in the ESP folder, but since that one did not work,
+// it got replaced by other code.
 
-/*
-    This example shows how to use the All Channel Scan or Fast Scan to connect
-    to a Wi-Fi network.
 
-    In the Fast Scan mode, the scan will stop as soon as the first network matching
-    the SSID is found. In this mode, an application can set threshold for the
-    authentication mode and the Signal strength. Networks that do not meet the
-    threshold requirements will be ignored.
 
-    In the All Channel Scan mode, the scan will end only after all the channels
-    are scanned, and connection will start with the best network. The networks
-    can be sorted based on Authentication Mode or Signal Strength. The priority
-    for the Authentication mode is:  WPA2 > WPA > WEP > Open
-*/
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "esp_wifi.h"
@@ -31,20 +17,21 @@
 #include "esp_system.h"
 #include <string.h>
 
-
+#define AMOUNT_OF_AP 10
 
 #define BEACON_SSID_OFFSET 38
 #define SRCADDR_OFFSET 10
 #define BSSID_OFFSET 22
-#define SEQNUM_OFFSET 22
 
-#define AMOUNT_OF_AP
+
 
 
 static const char *TAG = "scan";
 
 esp_err_t esp_wifi_80211_tx(wifi_interface_t ifx, const void *buffer, int len, bool en_sys_seq);
 
+
+// Raw template of a beacon frame
 uint8_t beacon_frame_raw[] = 
 {
 	0x80, 0x00,														// 0-1: Frame Control
@@ -53,10 +40,10 @@ uint8_t beacon_frame_raw[] =
 	0xba, 0xde, 0xaf, 0xfe, 0x00, 0x06,								// 10-15: Source address
 	0xba, 0xde, 0xaf, 0xfe, 0x00, 0x06,								// 16-21: BSSID
 	0x00, 0x00,														// 22-23: Sequence / fragment number
-	0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,					// 24-31: Timestamp (GETS OVERWRITTEN TO 0 BY HARDWARE)
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,					// 24-31: Timestamp (GETS OVERWRITTEN TO 0 BY HARDWARE)
 	0x64, 0x00,														// 32-33: Beacon interval
 	0x31, 0x04,														// 34-35: Capability info
-	0x00, 0x00, /* FILL CONTENT HERE */								// 36-38: SSID parameter set, 0x00:length:content
+	0x00, 0x00,														// 36-38: SSID parameter set, 0x00:length:content
 	0x01, 0x08, 0x82, 0x84,	0x8b, 0x96, 0x0c, 0x12, 0x18, 0x24,		// 39-48: Supported rates
 	0x03, 0x01, 0x01,												// 49-51: DS Parameter set, current channel 1 (= 0x01),
 	0x05, 0x04, 0x01, 0x02, 0x00, 0x00,								// 52-57: Traffic Indication Map
@@ -64,40 +51,39 @@ uint8_t beacon_frame_raw[] =
 };
 
 
+
+// Function that creates fake Acces Point beacon frames and sends these over wifi
 void false_ap_task(void *pvParameter)
 {
-
-	int total_count = 10;
-
-	uint8_t count = 0;
 	
-	
-	int i, j = 0;
-	char* myname = "Mark_is_awesome";
+	int total_count = AMOUNT_OF_AP;				//Amount of fake AP's
+	char* myname = "Mark_is_awesome";			//Name of the fake AP's
+	uint8_t count = 0;							
+	int i = 0;
 	long int name_length = strlen(myname);
 	
-	
-	for (;;)
+	// Continue sending beacon frames indefinitely 
+	while (true) 
 	{
 		do {
+			
 			vTaskDelay(100 / total_count / portTICK_PERIOD_MS);			
-			char *name = malloc(name_length + count + 1);
 			
-			strcpy(name, myname);
-				
-			printf("coppied name");
+			// Allocate memory to add spaces to the name
+			char *name = malloc(name_length + count + 1);			
+			strcpy(name, myname);									
 			
+
+			// a ' ' needs to be added to make seperate acces points with the same name
 			uint8_t spacecount = 0;
-			for (j = name_length; spacecount <= count; j++) {
+			for (i = name_length; spacecount <= count; i++) {		
 					
-					name[j] = ' ';
+					name[i] = ' ';
 					spacecount++;
 			}
 
-			name[name_length + count] = '\0';
+			name[name_length + count] = '\0';						
 			
-			printf("%s\n", name);
-
 			long int fullnamelength = strlen(name);
 			
 
@@ -112,23 +98,20 @@ void false_ap_task(void *pvParameter)
 
 
 		
-
-			esp_wifi_80211_tx(WIFI_IF_AP, beacon, sizeof(beacon_frame_raw) + fullnamelength, false);
+			//Send frame over wifi
+			esp_wifi_80211_tx(WIFI_IF_AP, beacon, sizeof(beacon_frame_raw) + fullnamelength, false);	
 
 			count++;
-			
-			free(name);
-		} while (count < total_count);
-
+			// Free previously allocated space
+			free(name);		
+		} while (count < total_count);	// Loop to reach targeted amount of AP's
 		
-		count = 0;
-
+		count = 0; 
 	}
 
-	
 }
 
-
+//Scan all channels for available Acces Points
 static void test_wifi_scan_all()
 {
     uint16_t ap_count = 0;
@@ -136,6 +119,7 @@ static void test_wifi_scan_all()
     uint8_t i;
     char *authmode;
 
+	//Scan for AP's
     esp_wifi_scan_get_ap_num(&ap_count);
     printf("--------scan count of AP is %d-------\n", ap_count);
     if (ap_count <= 0)
@@ -147,9 +131,11 @@ static void test_wifi_scan_all()
     printf("======================================================================\n");
     printf("             SSID             |    RSSI    |           AUTH           \n");
     printf("======================================================================\n");
-    for (i = 0; i < ap_count; i++)
+    
+	for (i = 0; i < ap_count; i++)
     {
-        switch (ap_list[i].authmode)
+		//Check AP's Authorization Mode
+        switch (ap_list[i].authmode)	
         {
         case WIFI_AUTH_OPEN:
             authmode = "WIFI_AUTH_OPEN";
@@ -171,8 +157,6 @@ static void test_wifi_scan_all()
             break;
         }
         printf("%26.26s    |    % 4d    |    %22.22s\n", ap_list[i].ssid, ap_list[i].rssi, authmode);
-
-
     }
     free(ap_list);
 }
@@ -183,16 +167,12 @@ static esp_err_t event_handler(void *ctx, system_event_t *event)
     switch (event->event_id) {
     case SYSTEM_EVENT_STA_START:
         ESP_LOGI(TAG, "SYSTEM_EVENT_STA_START");
-        //ESP_ERROR_CHECK(esp_wifi_connect());
         break;
     case SYSTEM_EVENT_STA_GOT_IP:
         ESP_LOGI(TAG, "SYSTEM_EVENT_STA_GOT_IP");
-        //ESP_LOGI(TAG, "Got IP: %s\n",
-        //         ip4addr_ntoa(&event->event_info.got_ip.ip_info.ip));
         break;
     case SYSTEM_EVENT_STA_DISCONNECTED:
         ESP_LOGI(TAG, "SYSTEM_EVENT_STA_DISCONNECTED");
-        //ESP_ERROR_CHECK(esp_wifi_connect());
         break;
     case SYSTEM_EVENT_SCAN_DONE:
         ESP_LOGI(TAG, "SYSTEM_EVENT_SCAN_DONE");
@@ -204,12 +184,13 @@ static esp_err_t event_handler(void *ctx, system_event_t *event)
     return ESP_OK;
 }
 
-/* Initialize Wi-Fi as sta and set scan method */
+// Initialize Wi-Fi as sta and set scan method 
 static void wifi_scan(void)
 {
     tcpip_adapter_init();
     ESP_ERROR_CHECK(esp_event_loop_init(event_handler, NULL));
 
+	//Configure WiFi Scan type
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
     wifi_scan_config_t scan_config = {
@@ -232,6 +213,7 @@ static void wifi_scan(void)
     }
 }
 
+
 void app_main()
 {
     // Initialize NVS
@@ -242,16 +224,15 @@ void app_main()
     }
     ESP_ERROR_CHECK(ret);
 
+	// Initialize WiFi 
 	tcpip_adapter_init();
-
-	
 	wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-
 	ESP_ERROR_CHECK(esp_event_loop_init(event_handler, NULL));
 	ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 	ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
 
 
+	// Set the esp wifi chip to behave as a wifi Acces Point
 	ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
 	wifi_config_t ap_config =
 	{
@@ -268,13 +249,14 @@ void app_main()
 		}
 	};
 
+	// Configure Wifi
 	ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_config));
 	ESP_ERROR_CHECK(esp_wifi_start());
 	ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
 
-
-	
+	// Launch false_ap_task
 	xTaskCreate(&false_ap_task, "false_ap_task", 2048, NULL, 5, NULL);
 
-   
+	// Scan Wifi 
+	//wifi_scan();
 }
